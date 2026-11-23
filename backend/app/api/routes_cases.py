@@ -25,7 +25,7 @@ from app.core.models import (
 )
 from app.core.storage import storage
 
-router = APIRouter(prefix="/api", tags=["Cases & Evidence"])
+router = APIRouter(tags=["Cases & Evidence"])
 
 
 class CreateCaseRequest(BaseModel):
@@ -270,6 +270,7 @@ async def simulate_messaging_forward(case_id: str, req: SimulateForwardRequest):
 # ------------------------------------------------------------------------------
 
 @router.post("/cases", response_model=Case, status_code=status.HTTP_201_CREATED)
+@router.post("/cases/", response_model=Case, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def create_case(req: CreateCaseRequest):
     """Creates a new digital forensics case with BSA 2023 Section 63 particulars."""
     case = case_store.create_case(
@@ -308,12 +309,14 @@ async def create_case(req: CreateCaseRequest):
 
 
 @router.get("/cases", response_model=List[Case])
+@router.get("/cases/", response_model=List[Case], include_in_schema=False)
 async def list_cases():
     """Lists all cases registered on this instance."""
     return case_store.list_cases()
 
 
 @router.get("/cases/{case_id}", response_model=Case)
+@router.get("/cases/{case_id}/", response_model=Case, include_in_schema=False)
 async def get_case(case_id: str):
     """Retrieves full case details including all evidence files."""
     case = case_store.get_case(case_id)
@@ -350,6 +353,7 @@ async def get_upload_url(case_id: str, filename: str):
 
 
 @router.post("/cases/{case_id}/files", response_model=EvidenceFile, status_code=status.HTTP_201_CREATED)
+@router.post("/cases/{case_id}/files/", response_model=EvidenceFile, status_code=status.HTTP_201_CREATED, include_in_schema=False)
 async def upload_evidence_file(
     case_id: str,
     file: UploadFile = File(...),
@@ -588,6 +592,7 @@ async def get_evidence_content(case_id: str, file_id: str):
 # ------------------------------------------------------------------------------
 
 @router.get("/cases/{case_id}/report.pdf")
+@router.get("/cases/{case_id}/report.pdf/", include_in_schema=False)
 async def generate_case_pdf_report(case_id: str):
     """Generates an official courtroom forensic report in PDF format adhering to
     Bharatiya Sakshya Adhiniyam (BSA), 2023 Section 63(4)(c) and ISO/IEC 27037:2012.
@@ -636,6 +641,7 @@ async def generate_case_pdf_report(case_id: str):
 
 
 @router.get("/cases/{case_id}/appendix.json")
+@router.get("/cases/{case_id}/appendix.json/", include_in_schema=False)
 async def download_technical_appendix_json(case_id: str):
     """Provides raw technical data, findings dictionaries, artifact pointers,
     and chain of custody logs as an exportable JSON appendix.

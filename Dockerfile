@@ -55,8 +55,10 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy built frontend assets from Stage 1
 COPY --from=frontend-builder /build/dist ./frontend/dist
 
-# Copy backend source code
+# Copy backend source code, samples, and scripts
 COPY backend ./backend
+COPY samples ./samples
+COPY scripts ./scripts
 
 # Create runtime evidence and scratch directories
 RUN mkdir -p /app/data/evidence /app/data/artifacts /app/data/scratch /tmp/forge_scratch && \

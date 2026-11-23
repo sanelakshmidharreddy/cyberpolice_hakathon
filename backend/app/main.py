@@ -115,7 +115,8 @@ async def api_root():
     }
 
 
-# Mount API routers
+# Mount API routers - both at /api and at root for total client & reverse proxy compatibility
+app.include_router(cases_router, prefix="/api")
 app.include_router(cases_router)
 
 

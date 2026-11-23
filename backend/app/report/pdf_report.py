@@ -1,4 +1,5 @@
 import io
+import re
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -50,29 +51,39 @@ class NumberedCanvas(reportlab.pdfgen.canvas.Canvas):
 
     def draw_header_footer(self, page_count: int):
         self.saveState()
-        self.setFont("Helvetica-Bold", 7.5)
-        self.setFillColor(colors.HexColor("#334155"))
 
-        # Top Running Header
-        self.drawString(
-            36,
-            800,
-            "FORGE DIGITAL FORENSICS PLATFORM • BSA 2023 SEC 63(4)(c) / SWGDE 18-Q-002",
-        )
-        self.setFont("Helvetica-Bold", 7.5)
-        self.setFillColor(colors.HexColor("#0284C7"))
-        self.drawRightString(
-            559,
-            800,
-            "CONFIDENTIAL // LAW ENFORCEMENT & JUDICIAL ADMISSIBILITY",
-        )
-
-        # Top rule
-        self.setStrokeColor(colors.HexColor("#CBD5E1"))
-        self.setLineWidth(0.5)
-        self.line(36, 794, 559, 794)
+        # Top Running Header: Only on page 2 and later to avoid colliding with Page 1 official title block
+        if self._pageNumber > 1:
+            self.setFont("Helvetica-Bold", 7.5)
+            self.setFillColor(colors.HexColor("#334155"))
+            self.drawString(
+                36,
+                814,
+                "FORGE DIGITAL FORENSICS PLATFORM • BSA 2023 SEC 63(4)(c) / SWGDE 18-Q-002",
+            )
+            self.setFillColor(colors.HexColor("#0284C7"))
+            self.drawRightString(
+                559,
+                814,
+                "CONFIDENTIAL // LAW ENFORCEMENT & JUDICIAL ADMISSIBILITY",
+            )
+            # Top rule
+            self.setStrokeColor(colors.HexColor("#CBD5E1"))
+            self.setLineWidth(0.5)
+            self.line(36, 808, 559, 808)
+        else:
+            # On Page 1, subtle top confidentiality indicator only
+            self.setFont("Helvetica-Bold", 7.5)
+            self.setFillColor(colors.HexColor("#0284C7"))
+            self.drawRightString(
+                559,
+                814,
+                "CONFIDENTIAL // FOR JUDICIAL ADMISSIBILITY ONLY",
+            )
 
         # Bottom rule
+        self.setStrokeColor(colors.HexColor("#CBD5E1"))
+        self.setLineWidth(0.5)
         self.line(36, 38, 559, 38)
 
         # Statutory Accountability Footer
@@ -235,8 +246,8 @@ def generate_pdf_report(
         pagesize=A4,
         leftMargin=36,
         rightMargin=36,
-        topMargin=48,
-        bottomMargin=46,
+        topMargin=64,
+        bottomMargin=50,
     )
 
     styles = get_pdf_styles()
@@ -477,11 +488,14 @@ def generate_pdf_report(
                 ev_str = str(check.evidence)
                 if len(ev_str) > 60:
                     ev_str = ev_str[:57] + "..."
+                # Sanitize any raw local paths from explanation
+                clean_exp = re.sub(r"(['\"][A-Za-z]:\\[^'\"]+['\"])", "'[evidence_file]'", check.explanation)
+                clean_exp = re.sub(r"(['\"]/(?:app|tmp|Users)[^'\"]+['\"])", "'[evidence_file]'", clean_exp)
                 findings_table_data.append([
                     Paragraph(f"<b>{mod_meta['title']}</b><br/><font color='#64748B'>{check.check_name}</font>", styles["TableCell"]),
                     Paragraph(mod_meta["meaning"], styles["TableCell"]),
                     Paragraph(f"<font color='{res_color}'><b>{check.result.value.upper()}</b></font><br/>Conf: {int(check.confidence*100)}%", styles["TableCellBold"]),
-                    Paragraph(f"{check.explanation}<br/><font color='#64748B'>{ev_str}</font>", styles["TableCell"]),
+                    Paragraph(f"{clean_exp}<br/><font color='#64748B'>{ev_str}</font>", styles["TableCell"]),
                     Paragraph(mod_meta["limitation"], styles["TableCell"]),
                 ])
     else:

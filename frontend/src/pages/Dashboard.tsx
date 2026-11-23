@@ -110,6 +110,27 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
+  const handleDownloadAppendix = async () => {
+    try {
+      const res = await fetch(`/api/cases/${currentCase.case_id}/appendix.json`);
+      if (!res.ok) {
+        throw new Error(`Server returned HTTP ${res.status}`);
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      const cleanRef = (currentCase.case_reference || currentCase.case_id).replace(/[^a-zA-Z0-9_-]/g, '_');
+      a.download = `FORGE_Technical_Appendix_${cleanRef}.json`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (err: any) {
+      alert(`Could not download appendix: ${err.message}`);
+    }
+  };
+
   const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
     const file = e.target.files[0];
@@ -212,15 +233,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </a>
 
           {/* Download Technical Appendix JSON */}
-          <a
-            href={`/api/cases/${currentCase.case_id}/appendix.json`}
-            download={`${currentCase.case_reference || currentCase.case_id}_appendix.json`}
+          <button
+            onClick={handleDownloadAppendix}
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors shadow-md"
             title="Download raw technical metrics, EXIF tags, and audit trail as a machine-readable JSON appendix"
           >
             <FileCode2 className="w-3.5 h-3.5 text-emerald-400" />
             <span>Technical Appendix (JSON)</span>
-          </a>
+          </button>
         </div>
       </div>
 
