@@ -1,15 +1,35 @@
-import { Case, AuditEntry, EvidenceFile, Verdict, ModuleResult } from './types';
+import { Case, AuditEntry, EvidenceFile, Verdict, ModuleResult, SampleFixture } from './types';
 
 const API_BASE = '/api';
 
-export async function createCase(investigatorName: string, caseReference: string): Promise<Case> {
+export interface CreateCaseParams {
+  case_id?: string;
+  investigator_name: string;
+  case_reference: string;
+  offense_type?: string;
+  requestor_name?: string;
+  authority_basis?: string;
+  examination_scope?: string;
+  producer_name?: string;
+  parentage_and_address?: string;
+  device_source_type?: string;
+  make_and_model?: string;
+  color?: string;
+  serial_or_imei?: string;
+  lawful_control_role?: string;
+  seized_at_ist?: string;
+  seizure_location?: string;
+  collection_method?: string;
+  expert_name?: string;
+  expert_designation?: string;
+  lab_organization?: string;
+}
+
+export async function createCase(params: CreateCaseParams): Promise<Case> {
   const res = await fetch(`${API_BASE}/cases`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      investigator_name: investigatorName,
-      case_reference: caseReference,
-    }),
+    body: JSON.stringify(params),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -33,6 +53,7 @@ export async function getCase(caseId: string): Promise<Case> {
 export async function uploadEvidenceFile(
   caseId: string,
   file: File,
+  autoPurge: boolean = false,
   onProgress?: (percent: number) => void
 ): Promise<EvidenceFile> {
   return new Promise((resolve, reject) => {
@@ -69,8 +90,39 @@ export async function uploadEvidenceFile(
 
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('auto_purge', String(autoPurge));
     xhr.send(formData);
   });
+}
+
+export async function listSamples(): Promise<SampleFixture[]> {
+  const res = await fetch(`${API_BASE}/samples`);
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function attachSample(caseId: string, filename: string): Promise<EvidenceFile> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/attach-sample/${filename}`, {
+    method: 'POST',
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to attach sample');
+  }
+  return res.json();
+}
+
+export async function simulateForward(caseId: string, sourceFileId?: string): Promise<EvidenceFile> {
+  const res = await fetch(`${API_BASE}/cases/${caseId}/simulate-forward`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ source_file_id: sourceFileId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to simulate messaging forward');
+  }
+  return res.json();
 }
 
 export async function triggerAnalysis(caseId: string, fileId: string): Promise<any> {
@@ -95,6 +147,8 @@ export async function getAnalysisResults(caseId: string, fileId: string): Promis
   file_id: string;
   status: string;
   sha256_at_upload?: string;
+  is_forward_simulation?: boolean;
+  forward_source_hash?: string | null;
   verdict?: Verdict | null;
   results?: Record<string, ModuleResult> | null;
 }> {
@@ -110,11 +164,18 @@ export async function getAuditTrail(caseId: string): Promise<AuditEntry[]> {
 }
 
 export function getArtifactUrl(caseId: string, fileId: string, artifactPath: string): string {
-  // Extract artifact filename from local filesystem path or URL
   const name = artifactPath.split(/[\/\\]/).pop() || 'artifact.png';
   return `${API_BASE}/cases/${caseId}/artifacts/${fileId}/${name}`;
 }
 
 export function getContentUrl(caseId: string, fileId: string): string {
   return `${API_BASE}/cases/${caseId}/files/${fileId}/content`;
+}
+
+export function getReportPdfUrl(caseId: string): string {
+  return `${API_BASE}/cases/${caseId}/report.pdf`;
+}
+
+export function getAppendixJsonUrl(caseId: string): string {
+  return `${API_BASE}/cases/${caseId}/appendix.json`;
 }

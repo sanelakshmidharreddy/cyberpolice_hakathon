@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Case, EvidenceFile } from '../types';
-import { triggerAnalysis, getAnalysisStatus, getAnalysisResults, uploadEvidenceFile } from '../api';
+import {
+  triggerAnalysis,
+  getAnalysisStatus,
+  uploadEvidenceFile,
+  simulateForward,
+} from '../api';
 import { VerdictBadge } from '../components/VerdictBadge';
 import { ImageForensicViewer } from '../components/ImageForensicViewer';
 import { VideoForensicViewer } from '../components/VideoForensicViewer';
@@ -22,19 +27,29 @@ import {
   Fingerprint,
   Layers,
   FileCheck,
+  Copy,
+  Share2,
+  FileCode2,
+  ShieldCheck,
 } from 'lucide-react';
 
 interface DashboardProps {
   currentCase: Case;
   onRefreshCase: () => void;
+  onDuplicateCase?: (c: Case) => void;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase }) => {
+export const Dashboard: React.FC<DashboardProps> = ({
+  currentCase,
+  onRefreshCase,
+  onDuplicateCase,
+}) => {
   const [selectedFileId, setSelectedFileId] = useState<string | null>(
     currentCase.files.length > 0 ? currentCase.files[0].file_id : null
   );
   const [activeTab, setActiveTab] = useState<'viewer' | 'findings' | 'custody'>('viewer');
   const [analyzing, setAnalyzing] = useState(false);
+  const [simulatingForward, setSimulatingForward] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
 
@@ -78,6 +93,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
     }
   };
 
+  const handleSimulateForward = async () => {
+    if (!selectedFile) return;
+    setSimulatingForward(true);
+    try {
+      const fwdFile = await simulateForward(currentCase.case_id, selectedFile.file_id);
+      onRefreshCase();
+      setSelectedFileId(fwdFile.file_id);
+      // Run analysis immediately on the simulated forward file
+      await triggerAnalysis(currentCase.case_id, fwdFile.file_id);
+      onRefreshCase();
+    } catch (err: any) {
+      alert(`Messaging forward simulation error: ${err.message}`);
+    } finally {
+      setSimulatingForward(false);
+    }
+  };
+
   const handleQuickUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
     const file = e.target.files[0];
@@ -85,7 +117,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
     setUploadPercent(0);
 
     try {
-      const uploaded = await uploadEvidenceFile(currentCase.case_id, file, (p) => setUploadPercent(p));
+      const uploaded = await uploadEvidenceFile(
+        currentCase.case_id,
+        file,
+        false,
+        (p: number) => setUploadPercent(p)
+      );
       onRefreshCase();
       setSelectedFileId(uploaded.file_id);
     } catch (err: any) {
@@ -129,29 +166,60 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
       {/* Case Header Card */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-xl font-bold text-slate-100">{currentCase.case_reference}</h1>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-cyan-950 text-cyan-400 border border-cyan-800">
               Cyber Hackathon 2026 (PS-05)
             </span>
+            {currentCase.device_source_type && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                Source: {currentCase.device_source_type} ({currentCase.make_and_model || 'Standard Device'})
+              </span>
+            )}
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-4 text-xs text-slate-400">
             <span>Investigator: <strong className="text-slate-200">{currentCase.investigator_name}</strong></span>
             <span>Registered: <strong className="text-slate-200">{new Date(currentCase.created_at).toLocaleString()}</strong></span>
-            <span>Case ID: <code className="text-slate-300 font-mono">{currentCase.case_id.slice(0, 8)}...</code></span>
+            <span>Case ID: <code className="text-slate-300 font-mono">{currentCase.case_id.slice(0, 16)}...</code></span>
+            {currentCase.producer_name && (
+              <span>Device Custodian: <strong className="text-slate-200">{currentCase.producer_name}</strong> ({currentCase.lawful_control_role || 'Custodian'})</span>
+            )}
           </div>
         </div>
 
-        {/* Global Case Action: Download PDF Report */}
-        <div className="flex items-center gap-3">
+        {/* Global Case Actions */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Duplicate Case Details */}
+          <button
+            onClick={() => onDuplicateCase?.(currentCase)}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors shadow-md"
+            title="Clone all filled case, custody, and device particulars into a fresh submission form"
+          >
+            <Copy className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Duplicate Case Details</span>
+          </button>
+
+          {/* Download Official Forensic PDF Report */}
           <a
             href={`/api/cases/${currentCase.case_id}/report.pdf`}
             target="_blank"
             rel="noreferrer"
-            className="flex items-center gap-2 px-4 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 transition-colors shadow-md"
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-cyan-950/80 hover:bg-cyan-900 text-cyan-200 border border-cyan-700/80 transition-colors shadow-md"
+            title="Download court-ready BSA 2023 Section 63(4)(c) Certificate & Technical Report (ReportLab PDF)"
           >
-            <Download className="w-4 h-4 text-cyan-400" />
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
             <span>Forensic PDF Report</span>
+          </a>
+
+          {/* Download Technical Appendix JSON */}
+          <a
+            href={`/api/cases/${currentCase.case_id}/appendix.json`}
+            download={`${currentCase.case_reference || currentCase.case_id}_appendix.json`}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors shadow-md"
+            title="Download raw technical metrics, EXIF tags, and audit trail as a machine-readable JSON appendix"
+          >
+            <FileCode2 className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Technical Appendix (JSON)</span>
           </a>
         </div>
       </div>
@@ -178,6 +246,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
               >
                 {getMediaIcon(file.media_type)}
                 <span className="max-w-[140px] truncate">{file.original_name}</span>
+                {file.is_forward_simulation && (
+                  <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                    FWD
+                  </span>
+                )}
                 <span className="flex items-center gap-1">{getStatusIcon(file.status)}</span>
               </button>
             );
@@ -190,7 +263,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
             <input
               type="file"
               className="hidden"
-              accept=".jpg,.jpeg,.png,.mp4,.avi,.wav,.mp3"
+              accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.mkv,.avi,.wav,.mp3,.m4a,.ogg"
               onChange={handleQuickUpload}
             />
           </label>
@@ -202,17 +275,41 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
         <div className="space-y-6">
           {/* Action & Status Bar */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3 text-xs text-slate-400">
+            <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-400">
               <span className="font-semibold text-slate-200">{selectedFile.original_name}</span>
               <span>•</span>
-              <span className="uppercase">{selectedFile.media_type}</span>
+              <span className="uppercase font-mono text-[11px] bg-slate-800 px-1.5 py-0.5 rounded text-cyan-300">
+                {selectedFile.media_type}
+              </span>
               <span>•</span>
               <span>{(selectedFile.size_bytes / 1024).toFixed(1)} KB</span>
               <span>•</span>
-              <span className="font-mono text-slate-500">SHA: {selectedFile.sha256_at_upload.slice(0, 12)}...</span>
+              <span className="font-mono text-slate-400" title={selectedFile.sha256_at_upload}>
+                SHA: {selectedFile.sha256_at_upload.slice(0, 16)}...
+              </span>
+              {selectedFile.auto_purge && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
+                  Auto-Purged (Privacy Compliant)
+                </span>
+              )}
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Simulate Messaging Forward Demo Button (Available for Image/Video) */}
+              {(selectedFile.media_type === 'image' || selectedFile.media_type === 'video') && (
+                <button
+                  onClick={handleSimulateForward}
+                  disabled={simulatingForward || analyzing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-lg bg-amber-950/50 hover:bg-amber-900/60 text-amber-300 border border-amber-700/70 transition-colors shadow-sm disabled:opacity-50"
+                  title="Simulate WhatsApp/messaging re-compression and EXIF stripping to demonstrate why forwarded media fails BSA Section 63 integrity checks"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-amber-400" />
+                  <span>
+                    {simulatingForward ? 'Simulating Forward...' : 'Duplicate & Simulate Messaging Forward'}
+                  </span>
+                </button>
+              )}
+
               {selectedFile.status === 'queued' && (
                 <button
                   onClick={handleStartAnalysis}
@@ -243,6 +340,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
               )}
             </div>
           </div>
+
+          {/* Forward Simulation Warning Callout */}
+          {selectedFile.is_forward_simulation && (
+            <div className="bg-amber-950/40 border border-amber-700/70 rounded-xl p-4 text-xs text-amber-200 space-y-2 shadow-lg">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="font-bold text-amber-300 text-sm">
+                  Simulated Social Messaging Forward (WhatsApp / Telegram Transcoding)
+                </span>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-900 text-amber-200 border border-amber-700">
+                  EXIF STRIPPED • RE-QUANTIZED
+                </span>
+              </div>
+              <p className="text-slate-300 text-xs leading-relaxed">
+                This evidence item demonstrates the destructive impact of messaging network forwards on judicial admissibility.
+                The server applied a genuine re-compression pass and stripped device metadata. Notice that the cryptographic hash
+                differs completely from the source capture, breaking the statutory Chain of Custody required under <strong>Bharatiya Sakshya Adhiniyam (BSA), 2023 Section 63</strong>.
+              </p>
+              {selectedFile.forward_source_hash && (
+                <div className="mt-2 p-2.5 bg-slate-950/70 rounded-lg border border-slate-800 font-mono text-[11px] space-y-1">
+                  <div className="text-slate-400">
+                    Source Evidence SHA-256: <span className="text-slate-200 font-bold">{selectedFile.forward_source_hash}</span>
+                  </div>
+                  <div className="text-amber-400">
+                    Forwarded Copy SHA-256: <span className="font-bold">{selectedFile.sha256_at_upload}</span> (INTEGRITY FAILED)
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Verdict Banner (If Done) */}
           {selectedFile.verdict && (
@@ -324,7 +451,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
             <input
               type="file"
               className="hidden"
-              accept=".jpg,.jpeg,.png,.mp4,.avi,.wav,.mp3"
+              accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.mkv,.avi,.wav,.mp3,.m4a,.ogg"
               onChange={handleQuickUpload}
             />
           </label>
@@ -333,3 +460,4 @@ export const Dashboard: React.FC<DashboardProps> = ({ currentCase, onRefreshCase
     </div>
   );
 };
+export default Dashboard;

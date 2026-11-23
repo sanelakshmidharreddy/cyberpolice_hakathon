@@ -1,6 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -24,6 +25,9 @@ logger = logging.getLogger("forge.orchestrator")
 
 # In-memory real-time module status registry: status_map[file_id][module_name] = status_str
 _module_status_registry: Dict[str, Dict[str, str]] = {}
+
+# Render Free Tier concurrency guard (512 MB RAM limit): Ensure only 1 forensic analysis pipeline executes at a time
+_analysis_semaphore = asyncio.Semaphore(1)
 
 
 def get_analyzers_for_media(media_type: MediaType) -> List[BaseAnalyzer]:
@@ -106,7 +110,8 @@ def analyze_evidence_file_sync(case_id: str, file_id: str):
     timeout = settings.MODULE_TIMEOUT_SECONDS
 
     start_all = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=min(4, len(analyzers))) as executor:
+    # Bound worker threads to 2 to conserve memory on Render 512 MB tier
+    with ThreadPoolExecutor(max_workers=min(2, len(analyzers))) as executor:
         futures = {
             executor.submit(_run_single_module, analyzer, working_copy, case_id, file_id): analyzer
             for analyzer in analyzers
@@ -175,8 +180,29 @@ def analyze_evidence_file_sync(case_id: str, file_id: str):
         sha256=ev_file.sha256_at_upload,
     )
 
+    # Privacy Auto-Purge: Securely purge raw file if requested after analysis & artifacts are saved
+    if ev_file.auto_purge:
+        try:
+            raw_path = storage.get_evidence_path(ev_file.storage_path)
+            if raw_path.exists():
+                import stat
+                raw_path.chmod(stat.S_IWRITE)
+                raw_path.unlink()
+                audit_logger.log(
+                    case_id=case_id,
+                    file_id=file_id,
+                    action="RAW_FILE_PURGED",
+                    actor="FORGE Privacy Engine",
+                    details={"reason": "Auto-purge enabled by user; raw file securely unlinked while preserving hashes & metrics."},
+                    sha256=ev_file.sha256_at_upload,
+                )
+                logger.info(f"Auto-purged raw evidence file {ev_file.original_name} for case {case_id}")
+        except Exception as purge_err:
+            logger.warning(f"Failed to auto-purge raw evidence file: {purge_err}")
+
 
 async def run_analysis_background(case_id: str, file_id: str):
-    """Asynchronous wrapper for background execution."""
-    loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, analyze_evidence_file_sync, case_id, file_id)
+    """Asynchronous wrapper for background execution protected by semaphore."""
+    async with _analysis_semaphore:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, analyze_evidence_file_sync, case_id, file_id)

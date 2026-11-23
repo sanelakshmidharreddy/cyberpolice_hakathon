@@ -4,24 +4,54 @@ import { listCases, getCase } from './api';
 import { Navbar } from './components/Navbar';
 import { Dashboard } from './pages/Dashboard';
 import { NewCaseModal } from './pages/NewCaseModal';
-import { Shield, Plus, FolderSearch, RefreshCw } from 'lucide-react';
+import { Shield, Plus, RefreshCw, Zap } from 'lucide-react';
 
 export const App: React.FC = () => {
   const [cases, setCases] = useState<Case[]>([]);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [currentCase, setCurrentCase] = useState<Case | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [isWakingBackend, setIsWakingBackend] = useState<boolean>(false);
   const [isNewCaseOpen, setIsNewCaseOpen] = useState<boolean>(false);
+  const [duplicateCase, setDuplicateCase] = useState<Case | null>(null);
+
+  // Probe health / cold start on mount
+  useEffect(() => {
+    let active = true;
+    const probeHealth = async () => {
+      const start = Date.now();
+      try {
+        const controller = new AbortController();
+        const timer = setTimeout(() => {
+          if (active) setIsWakingBackend(true);
+        }, 1200);
+
+        const res = await fetch('/healthz', { signal: controller.signal });
+        clearTimeout(timer);
+        if (res.ok && active) {
+          setIsWakingBackend(false);
+        }
+      } catch (e) {
+        if (active) setIsWakingBackend(true);
+      }
+    };
+    probeHealth();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const fetchCases = useCallback(async () => {
     try {
       const list = await listCases();
       setCases(list);
+      setIsWakingBackend(false);
       if (list.length > 0 && !activeCaseId) {
         setActiveCaseId(list[0].case_id);
       }
     } catch (err) {
       console.error('Failed to list cases:', err);
+      setIsWakingBackend(true);
     } finally {
       setLoading(false);
     }
@@ -52,16 +82,37 @@ export const App: React.FC = () => {
     setCases((prev) => [newCase, ...prev]);
     setActiveCaseId(newCase.case_id);
     setCurrentCase(newCase);
+    setDuplicateCase(null);
+  };
+
+  const handleOpenNewCase = () => {
+    setDuplicateCase(null);
+    setIsNewCaseOpen(true);
+  };
+
+  const handleDuplicateCase = (c: Case) => {
+    setDuplicateCase(c);
+    setIsNewCaseOpen(true);
   };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+      {/* Cold-Start Waking Banner for Render Free Tier */}
+      {isWakingBackend && (
+        <div className="bg-gradient-to-r from-cyan-950 via-slate-900 to-cyan-950 border-b border-cyan-800/80 px-4 py-2 text-xs text-center text-cyan-200 flex items-center justify-center gap-2 shadow-inner">
+          <RefreshCw className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+          <span>
+            <strong>Waking forensic engine (~1 min on Render free tier)...</strong> Please wait while the cloud container starts.
+          </span>
+        </div>
+      )}
+
       {/* Top Forensic Navigation Bar */}
       <Navbar
         cases={cases}
         activeCaseId={activeCaseId}
         onSelectCase={(id) => setActiveCaseId(id)}
-        onNewCase={() => setIsNewCaseOpen(true)}
+        onNewCase={handleOpenNewCase}
       />
 
       {/* Main Content Area */}
@@ -70,9 +121,18 @@ export const App: React.FC = () => {
           <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3 text-slate-400">
             <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
             <p className="text-sm font-medium">Connecting to FORGE Forensic Engine...</p>
+            {isWakingBackend && (
+              <p className="text-xs text-slate-500 max-w-sm text-center">
+                Render free tier spins down idle instances after 15 minutes. Cold boot in progress...
+              </p>
+            )}
           </div>
         ) : currentCase ? (
-          <Dashboard currentCase={currentCase} onRefreshCase={fetchCurrentCase} />
+          <Dashboard
+            currentCase={currentCase}
+            onRefreshCase={fetchCurrentCase}
+            onDuplicateCase={handleDuplicateCase}
+          />
         ) : (
           <div className="max-w-xl mx-auto mt-20 text-center p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl space-y-5">
             <div className="p-3 bg-cyan-950/80 border border-cyan-800/80 text-cyan-400 rounded-2xl w-fit mx-auto shadow-inner">
@@ -82,11 +142,11 @@ export const App: React.FC = () => {
               <h2 className="text-xl font-bold text-slate-100">Welcome to FORGE Platform</h2>
               <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
                 Digital Evidence Authenticity & Integrity Verification Platform for Cyber Hackathon 2026 (PS-05).
-                No case is currently active. Register a new forensics case to begin.
+                No case is currently active. Register a new forensics case or load a demo case to begin.
               </p>
             </div>
             <button
-              onClick={() => setIsNewCaseOpen(true)}
+              onClick={handleOpenNewCase}
               className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white transition-all shadow-lg shadow-cyan-950/50"
             >
               <Plus className="w-4 h-4" />
@@ -103,7 +163,7 @@ export const App: React.FC = () => {
             FORGE v1.0.0 • Cyber Hackathon 2026 (C-DAC Patna / CCSU Bihar Police PS-05)
           </span>
           <span className="text-[11px] text-slate-600">
-            Chain of custody protected under Indian Evidence Act & Section 65B compliance standards.
+            Statutory Certificate compliance under Bharatiya Sakshya Adhiniyam, 2023 Section 63(4)(c).
           </span>
         </div>
       </footer>
@@ -111,8 +171,12 @@ export const App: React.FC = () => {
       {/* New Case Creation Modal */}
       <NewCaseModal
         isOpen={isNewCaseOpen}
-        onClose={() => setIsNewCaseOpen(false)}
+        onClose={() => {
+          setIsNewCaseOpen(false);
+          setDuplicateCase(null);
+        }}
         onCaseCreated={handleCaseCreated}
+        initialCase={duplicateCase}
       />
     </div>
   );
